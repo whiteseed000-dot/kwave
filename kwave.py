@@ -1,40 +1,44 @@
-import streamlit as st
-import plotly.graph_objects as go
-from data import load_data
-from kondratieff import preprocess, bandpass_filter, detect_phase
+import numpy as np
+from scipy.signal import butter, filtfilt
 
+# =========================
+# Band-pass filter (40–60Y)
+# =========================
+def bandpass_filter(series, low=1/60, high=1/40, order=2):
+    b, a = butter(order, [low, high], btype='bandpass')
+    return filtfilt(b, a, series)
 
-st.set_page_config(layout='wide')
-st.title('📈 台股康波模型（Kondratieff Wave）')
+# =========================
+# 康波相位判定
+# =========================
+def detect_k_wave_phase(close_series):
+    log_price = np.log(close_series.values)
+    cycle = bandpass_filter(log_price)
 
+    slope = np.gradient(cycle)
+    curve = np.gradient(slope)
 
-df = load_data()
-df = preprocess(df)
+    s = slope[-1]
+    c = curve[-1]
 
+    if s > 0 and c > 0:
+        return "Spring"
+    elif s > 0 and c < 0:
+        return "Summer"
+    elif s < 0 and c < 0:
+        return "Autumn"
+    else:
+        return "Winter"
 
-df['cycle'] = bandpass_filter(df['log_price'])
-df['phase'] = detect_phase(df['cycle'])
+# =========================
+# 康波數值化
+# =========================
+K_WAVE_SCORE = {
+    "Spring": 1.0,
+    "Summer": 0.5,
+    "Autumn": -0.5,
+    "Winter": -1.0
+}
 
-
-fig = go.Figure()
-fig.add_trace(go.Scatter(
-x=df.index,
-y=df['Close'],
-name='TAIEX'
-))
-
-
-fig.add_trace(go.Scatter(
-x=df.index,
-y=np.exp(df['cycle']),
-name='K-wave',
-yaxis='y2'
-))
-
-
-fig.update_layout(
-yaxis2=dict(overlaying='y', side='right')
-)
-
-
-st.plotly_chart(fig, use_container_width=True)
+def k_wave_score(phase):
+    return K_WAVE_SCORE.get(phase, 0)
