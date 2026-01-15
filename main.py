@@ -3,7 +3,7 @@ import plotly.graph_objects as go
 
 from data import load_twii
 from kwave import detect_k_wave_phase, k_wave_score
-from resonance import calc_total_resonance
+
 
 st.set_page_config(layout="wide")
 st.title("📈 台股康波 × 共振模型（Kondratieff Wave）")
