@@ -55,7 +55,7 @@ monthly_close = (
     price
     .dropna()
     .resample("M")
-    .last()
+    .ffill()
 )
 
 st.caption(f"📊 月線資料筆數：{len(monthly_close)}")
