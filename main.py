@@ -1,6 +1,7 @@
 # =========================================
 # 台股康波 × 共振模型（Kondratieff Wave）
-# 回測年數：100 年（修正版，保證不再報錯）
+# 回測年數：100 年
+# ❗ 終極防呆版（不可能再出 savgol 錯）
 # =========================================
 
 import streamlit as st
@@ -12,21 +13,20 @@ from datetime import datetime, timedelta
 from scipy.signal import savgol_filter
 
 # =====================
-# 基本設定
+# Streamlit 設定
 # =====================
 st.set_page_config(page_title="台股康波 × 共振模型", layout="wide")
-
-BACKTEST_YEARS = 100
-K_WAVE_WINDOW = 240   # 理想康波（月）
-SMOOTH_POLY = 3
-
-# =====================
-# 標題
-# =====================
 st.title("📈 台股康波 × 共振模型（Kondratieff Wave）")
 
 # =====================
-# 取得 100 年月資料
+# 參數
+# =====================
+BACKTEST_YEARS = 100
+K_WAVE_WINDOW = 240
+SMOOTH_POLY = 3
+
+# =====================
+# 下載資料（100 年）
 # =====================
 end_date = datetime.today()
 start_date = end_date - timedelta(days=BACKTEST_YEARS * 365)
@@ -41,34 +41,63 @@ df = yf.download(
 )
 
 df = df.dropna()
-monthly_close = df["Close"].copy()
 
-# =====================
-# 🔴 關鍵修正：window 永遠不超過資料長度
-# =====================
-data_len = len(monthly_close)
-
-if data_len < 10:
-    st.error("資料不足，無法計算康波")
+if "Close" not in df or len(df) < 12:
+    st.error("資料不足，無法計算")
     st.stop()
 
-# window 必須是奇數，且 <= 資料長度
+monthly_close = df["Close"].astype(float)
+data_len = len(monthly_close)
+
+# =====================
+# 🧨 終極防呆 Savitzky–Golay
+# =====================
+# 規則：
+# 1. window < data_len
+# 2. window 為奇數
+# 3. window >= 3
+# 4. poly < window
+# 5. 不合法 → 改用 rolling mean
+
+use_savgol = True
+
 window = min(K_WAVE_WINDOW, data_len - 1)
+
+if window < 3:
+    use_savgol = False
+
 if window % 2 == 0:
     window -= 1
 
-# polyorder 必須 < window
 poly = min(SMOOTH_POLY, window - 1)
 
-k_wave = savgol_filter(
-    monthly_close.values,
-    window_length=window,
-    polyorder=poly,
-    mode="interp"
-)
+if poly < 1 or window <= poly:
+    use_savgol = False
+
+if use_savgol:
+    try:
+        k_wave = savgol_filter(
+            monthly_close.values,
+            window_length=window,
+            polyorder=poly,
+            mode="interp"
+        )
+    except Exception:
+        use_savgol = False
 
 # =====================
-# Plotly 繪圖
+# 備援方案（永遠不會錯）
+# =====================
+if not use_savgol:
+    k_wave = (
+        monthly_close
+        .rolling(window=max(6, data_len // 10), min_periods=1)
+        .mean()
+        .values
+    )
+
+# =====================
+# 繪圖
 # =====================
 fig = go.Figure()
 
@@ -99,7 +128,7 @@ fig.update_layout(
 st.plotly_chart(fig, use_container_width=True)
 
 # =====================
-# 康波決策提示
+# 康波判斷
 # =====================
 st.subheader("🧠 康波決策提示")
 
@@ -111,14 +140,14 @@ if len(k_wave) >= 12:
     )[0]
 
     if slope > 0:
-        st.success("🌱 康波 Spring：長期偏多趨勢")
+        st.success("🌱 康波 Spring：長期上升週期")
     else:
-        st.error("🥀 康波 Winter：長期偏空趨勢")
+        st.error("🥀 康波 Winter：長期下降週期")
 
 # =====================
-# 資訊顯示
+# 狀態資訊
 # =====================
 st.caption(f"回測年數：{BACKTEST_YEARS} 年")
 st.caption(f"月資料筆數：{data_len}")
-st.caption(f"實際康波 window（月）：{window}")
-st.caption(f"Savgol polyorder：{poly}")
+st.caption(f"實際 window：{window if use_savgol else 'Rolling Mean'}")
+st.caption(f"polyorder：{poly if use_savgol else 'N/A'}")
