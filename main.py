@@ -11,7 +11,7 @@ st.title("📈 台股康波 × 共振模型（Kondratieff Wave）")
 
 # ========= 參數 =========
 TICKER = "^TWII"
-WINDOW_MONTHS = 240
+WINDOW_MONTHS = 1200
 
 # ========= 下載資料 =========
 @st.cache_data
