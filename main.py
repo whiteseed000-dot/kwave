@@ -6,8 +6,12 @@ from kwave import detect_k_wave_phase, k_wave_score
 
 twii = load_twii_monthly()
 
-k_phase = detect_k_wave_phase(twii['Close'])
+k_phase, k_method = detect_k_wave_phase(twii['Close'])
 k_score = k_wave_score(k_phase)
+
+st.metric("目前康波階段", k_phase)
+st.caption(f"康波計算方式：{k_method}")
+
 
 
 st.set_page_config(layout="wide")
