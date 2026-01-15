@@ -1,14 +1,12 @@
 import streamlit as st
+import yfinance as yf
+import pandas as pd
+import numpy as np
 import plotly.graph_objects as go
 
-from data import load_twii_monthly
-from kwave import detect_k_wave_phase, k_wave_score
-from resonance import calc_total_resonance
-
-
-# =========================
-# Streamlit 設定
-# =========================
+# =============================
+# Streamlit 基本設定
+# =============================
 st.set_page_config(
     page_title="台股康波 × 共振模型（Kondratieff Wave）",
     layout="wide"
@@ -16,133 +14,148 @@ st.set_page_config(
 
 st.title("📈 台股康波 × 共振模型（Kondratieff Wave）")
 
+# =============================
+# 參數設定
+# =============================
+START_DATE = "1985-01-01"
+TICKER = "^TWII"
 
-# =========================
-# 讀取台股（月資料）
-# =========================
-with st.spinner("載入台股資料中..."):
-    twii = load_twii_monthly()
+# 康波參數（年）
+K_WAVE_YEARS = 50
+MONTHS = K_WAVE_YEARS * 12
 
-st.success(f"資料期間：{twii.index.min().date()} ~ {twii.index.max().date()}")
+# =============================
+# 下載台股資料（非常關鍵）
+# =============================
+@st.cache_data
+def load_data():
+    df = yf.download(
+        TICKER,
+        start=START_DATE,
+        auto_adjust=True,
+        progress=False
+    )
+    df.index = pd.to_datetime(df.index)
+    df = df.sort_index()
+    return df
 
+df = load_data()
 
-# =========================
-# 康波分析
-# =========================
-k_phase, k_method = detect_k_wave_phase(twii["Close"])
-k_score = k_wave_score(k_phase)
+if df.empty:
+    st.error("❌ 無法取得台股資料")
+    st.stop()
 
-
-# =========================
-# 顯示康波狀態
-# =========================
-st.subheader("🌍 宏觀康波狀態")
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.metric("目前康波階段", k_phase)
-
-with col2:
-    st.metric("康波分數", k_score)
-
-with col3:
-    st.metric("計算方式", k_method)
-
-
-# =========================
-# （示範）你的原本共振分數
-# 👉 實務上請換成你真實的共振計算
-# =========================
-st.subheader("🎯 共振分數整合（示範）")
-
-base_resonance_score = st.number_input(
-    "原始共振分數（示範用）",
-    value=2.5,
-    step=0.1
+# =============================
+# 轉為月線（關鍵步驟）
+# =============================
+monthly_close = (
+    df["Close"]
+    .resample("M")
+    .last()
+    .dropna()
 )
 
-K_WEIGHT = st.slider(
-    "康波權重",
-    min_value=0.0,
-    max_value=0.5,
-    value=0.25,
-    step=0.05
-)
+st.caption(f"📊 月線資料筆數：{len(monthly_close)}")
 
-final_score = calc_total_resonance(
-    base_resonance_score,
-    k_score,
-    weight=K_WEIGHT
-)
+# =============================
+# 康波計算（穩定版，不用 scipy）
+# =============================
+def calc_kondratieff(series: pd.Series, window: int):
+    """
+    使用 long-term moving average + 曲率判斷
+    """
+    log_price = np.log(series)
 
-st.write(f"🔹 原始共振分數：**{base_resonance_score}**")
-st.write(f"🔹 最終共振分數（含康波）：**{final_score:.2f}**")
+    # 長期趨勢（康波）
+    long_trend = log_price.rolling(
+        window=window,
+        min_periods=window // 2
+    ).mean()
 
+    # 一階導數（趨勢方向）
+    slope = long_trend.diff()
 
-# =========================
-# 視覺化：台股月線
-# =========================
-st.subheader("📊 台股加權指數（月線）")
+    # 二階導數（加速度 / 曲率）
+    curvature = slope.diff()
 
+    return long_trend, slope, curvature
+
+k_trend, k_slope, k_curve = calc_kondratieff(monthly_close, MONTHS)
+
+# =============================
+# 康波相位判定
+# =============================
+def detect_phase(slope, curve):
+    if slope > 0 and curve > 0:
+        return "Spring 🌱"
+    elif slope > 0 and curve < 0:
+        return "Summer 🔥"
+    elif slope < 0 and curve < 0:
+        return "Autumn 🍂"
+    else:
+        return "Winter ❄️"
+
+latest_slope = k_slope.dropna().iloc[-1]
+latest_curve = k_curve.dropna().iloc[-1]
+k_phase = detect_phase(latest_slope, latest_curve)
+
+# =============================
+# Plotly 繪圖
+# =============================
 fig = go.Figure()
 
+# 台股月線
 fig.add_trace(
     go.Scatter(
-        x=twii.index,
-        y=twii["Close"],
+        x=monthly_close.index,
+        y=monthly_close.values,
+        mode="lines",
         name="TAIEX（月線）",
         line=dict(width=2)
     )
 )
 
+# 康波趨勢（指數化還原）
+fig.add_trace(
+    go.Scatter(
+        x=k_trend.index,
+        y=np.exp(k_trend),
+        mode="lines",
+        name="康波趨勢（K-Wave）",
+        line=dict(width=3, dash="dash")
+    )
+)
+
 fig.update_layout(
-    height=500,
-    xaxis_title="Date",
-    yaxis_title="Index",
+    height=550,
     template="plotly_dark",
-    showlegend=True
+    legend=dict(x=0.01, y=0.99),
+    xaxis_title="Date",
+    yaxis_title="Index"
 )
 
 st.plotly_chart(fig, use_container_width=True)
 
-
-# =========================
-# 決策提示（實戰用）
-# =========================
+# =============================
+# 康波決策提示
+# =============================
 st.subheader("🧠 康波決策提示")
 
-if k_phase == "Winter":
-    st.error(
-        "❄️ 康波 Winter：\n"
-        "• 建議降低交易頻率\n"
-        "• 嚴格風控\n"
-        "• 避免追高策略"
-    )
-elif k_phase == "Spring":
-    st.success(
-        "🌱 康波 Spring：\n"
-        "• 結構性復甦階段\n"
-        "• 適合中長期佈局\n"
-        "• 共振策略成功率提升"
-    )
-elif k_phase == "Summer":
-    st.warning(
-        "🔥 康波 Summer：\n"
-        "• 趨勢仍在，但需留意過熱\n"
-        "• 停利與風控重要"
-    )
-else:  # Autumn
-    st.warning(
-        "🍂 康波 Autumn：\n"
-        "• 泡沫化風險上升\n"
-        "• 避免追逐高估值"
-    )
+if "Spring" in k_phase:
+    st.success("🌱 康波 Spring：長期佈局期，逢回可分批布局")
+elif "Summer" in k_phase:
+    st.warning("🔥 康波 Summer：趨勢仍在，但留意過熱與風控")
+elif "Autumn" in k_phase:
+    st.info("🍂 康波 Autumn：高檔震盪，適合逐步降低曝險")
+else:
+    st.error("❄️ 康波 Winter：系統性風險期，現金與防禦優先")
 
+st.markdown(f"""
+**目前康波狀態： `{k_phase}`**
 
-# =========================
-# Footer
-# =========================
-st.caption(
-    "⚠️ 本模型為長週期結構分析工具（非短線預測）。"
-)
+- 康波年期： `{K_WAVE_YEARS} 年`
+- 最新趨勢斜率： `{latest_slope:.5f}`
+- 最新曲率： `{latest_curve:.5f}`
+""")
+
+st.caption("⚠️ 本模型為長週期趨勢分析，非短線買賣建議")
