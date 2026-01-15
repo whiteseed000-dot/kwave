@@ -1,23 +1,19 @@
 import streamlit as st
 import plotly.graph_objects as go
 
-from data import load_twii
+from data import load_twii_monthly
 from kwave import detect_k_wave_phase, k_wave_score
+
+twii = load_twii_monthly()
+
+k_phase = detect_k_wave_phase(twii['Close'])
+k_score = k_wave_score(k_phase)
 
 
 st.set_page_config(layout="wide")
 st.title("📈 台股康波 × 共振模型（Kondratieff Wave）")
 
-# =========================
-# 讀取台股資料
-# =========================
-twii = load_twii()
 
-# =========================
-# 康波分析
-# =========================
-k_phase = detect_k_wave_phase(twii['Close'])
-k_score = k_wave_score(k_phase)
 
 st.subheader("🌍 宏觀康波狀態")
 st.metric("目前康波階段", k_phase)
