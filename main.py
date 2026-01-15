@@ -1,6 +1,6 @@
 # =========================================
 # 台股康波 × 共振模型（Kondratieff Wave）
-# 回測年數：100 年（固定）
+# 回測年數：100 年（修正版，保證不再報錯）
 # =========================================
 
 import streamlit as st
@@ -17,7 +17,7 @@ from scipy.signal import savgol_filter
 st.set_page_config(page_title="台股康波 × 共振模型", layout="wide")
 
 BACKTEST_YEARS = 100
-K_WAVE_WINDOW = 240   # 康波平滑（月）
+K_WAVE_WINDOW = 240   # 理想康波（月）
 SMOOTH_POLY = 3
 
 # =====================
@@ -44,16 +44,28 @@ df = df.dropna()
 monthly_close = df["Close"].copy()
 
 # =====================
-# 康波計算（長週期趨勢）
+# 🔴 關鍵修正：window 永遠不超過資料長度
 # =====================
-if len(monthly_close) >= K_WAVE_WINDOW:
-    k_wave = savgol_filter(
-        monthly_close.values,
-        window_length=K_WAVE_WINDOW if K_WAVE_WINDOW % 2 == 1 else K_WAVE_WINDOW + 1,
-        polyorder=SMOOTH_POLY
-    )
-else:
-    k_wave = np.full(len(monthly_close), np.nan)
+data_len = len(monthly_close)
+
+if data_len < 10:
+    st.error("資料不足，無法計算康波")
+    st.stop()
+
+# window 必須是奇數，且 <= 資料長度
+window = min(K_WAVE_WINDOW, data_len - 1)
+if window % 2 == 0:
+    window -= 1
+
+# polyorder 必須 < window
+poly = min(SMOOTH_POLY, window - 1)
+
+k_wave = savgol_filter(
+    monthly_close.values,
+    window_length=window,
+    polyorder=poly,
+    mode="interp"
+)
 
 # =====================
 # Plotly 繪圖
@@ -77,7 +89,7 @@ fig.add_trace(go.Scatter(
 ))
 
 fig.update_layout(
-    height=600,
+    height=650,
     template="plotly_dark",
     xaxis_title="Date",
     yaxis_title="Index",
@@ -91,7 +103,7 @@ st.plotly_chart(fig, use_container_width=True)
 # =====================
 st.subheader("🧠 康波決策提示")
 
-if len(k_wave) > 0 and not np.isnan(k_wave[-1]):
+if len(k_wave) >= 12:
     slope = np.polyfit(
         np.arange(12),
         k_wave[-12:],
@@ -107,5 +119,6 @@ if len(k_wave) > 0 and not np.isnan(k_wave[-1]):
 # 資訊顯示
 # =====================
 st.caption(f"回測年數：{BACKTEST_YEARS} 年")
-st.caption(f"月資料筆數：{len(monthly_close)}")
-st.caption(f"康波 window（月）：{K_WAVE_WINDOW}")
+st.caption(f"月資料筆數：{data_len}")
+st.caption(f"實際康波 window（月）：{window}")
+st.caption(f"Savgol polyorder：{poly}")
