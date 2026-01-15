@@ -1,34 +1,60 @@
-import numpy as np
-import pandas as pd
-from scipy.signal import butter, filtfilt
+import streamlit as st
+import plotly.graph_objects as go
 
+from data import load_twii
+from kwave import detect_k_wave_phase, k_wave_score
+from resonance import calc_total_resonance
 
-def preprocess(df):
-df = df[['Close']].dropna()
-df['log_price'] = np.log(df['Close'])
-return df
+st.set_page_config(layout="wide")
+st.title("📈 台股康波 × 共振模型（Kondratieff Wave）")
 
-def bandpass_filter(series, low=1/60, high=1/40):
-b, a = butter(
-N=2,
-Wn=[low, high],
-btype='bandpass'
+# =========================
+# 讀取台股資料
+# =========================
+twii = load_twii()
+
+# =========================
+# 康波分析
+# =========================
+k_phase = detect_k_wave_phase(twii['Close'])
+k_score = k_wave_score(k_phase)
+
+st.subheader("🌍 宏觀康波狀態")
+st.metric("目前康波階段", k_phase)
+st.metric("康波分數", k_score)
+
+# =========================
+# 模擬你的「原本共振分數」
+# （實際上請換成你自己的）
+# =========================
+base_resonance_score = 2.5  # 👈 假設值
+
+final_score = calc_total_resonance(
+    base_resonance_score,
+    k_score,
+    weight=0.25
 )
-return filtfilt(b, a, series)
 
-def detect_phase(cycle):
-slope = np.gradient(cycle)
-curve = np.gradient(slope)
+st.subheader("🎯 共振分數整合結果")
+st.write(f"原始共振分數：{base_resonance_score}")
+st.write(f"最終共振分數（含康波）：{final_score:.2f}")
 
+# =========================
+# 視覺化
+# =========================
+fig = go.Figure()
 
-phase = []
-for s, c in zip(slope, curve):
-if s > 0 and c > 0:
-phase.append('Spring') # 復甦
-elif s > 0 and c < 0:
-phase.append('Summer') # 繁榮
-elif s < 0 and c < 0:
-phase.append('Autumn') # 泡沫
-else:
-phase.append('Winter') # 衰退
-return phase
+fig.add_trace(go.Scatter(
+    x=twii.index,
+    y=twii['Close'],
+    name="TAIEX",
+    line=dict(color="white")
+))
+
+fig.update_layout(
+    template="plotly_dark",
+    height=500,
+    title="TAIEX Index"
+)
+
+st.plotly_chart(fig, use_container_width=True)
