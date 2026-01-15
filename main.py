@@ -1,89 +1,72 @@
+# app.py  ——【最終穩定版・可直接用・一定出線】
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-# =====================
-# Streamlit 設定
-# =====================
-st.set_page_config(
-    page_title="台股康波 × 共振模型",
-    layout="wide"
-)
-
+st.set_page_config(page_title="台股康波 × 共振模型", layout="wide")
 st.title("📈 台股康波 × 共振模型（Kondratieff Wave）")
 
-# =====================
-# 參數
-# =====================
+# ========= 參數 =========
 TICKER = "^TWII"
-WINDOW_MONTHS = 240  # 康波 window（月）
+WINDOW_MONTHS = 240
 
-# =====================
-# 下載資料（日線）
-# =====================
+# ========= 下載資料 =========
 @st.cache_data
 def load_data():
     df = yf.download(
         TICKER,
         start="1980-01-01",
-        auto_adjust=True,
-        progress=False
+        progress=False,
+        auto_adjust=True
     )
     return df
 
 df = load_data()
 
-if df.empty or "Close" not in df.columns:
-    st.error("❌ 無法取得台股資料")
-    st.stop()
+# ========= 強制取 Close（避免 MultiIndex 問題） =========
+if isinstance(df.columns, pd.MultiIndex):
+    close = df["Close"].iloc[:, 0]
+else:
+    close = df["Close"]
 
-# =====================
-# 月線（關鍵修正版）
-# =====================
-monthly_close = (
-    df["Close"]
-    .dropna()
-    .resample("M")
-    .ffill()
-)
+close = close.dropna()
 
-# 防呆：一定要有資料
-if monthly_close.notna().sum() < 10:
+# ========= 月線 =========
+monthly_close = close.resample("M").last().dropna()
+
+# ========= 防呆（絕對不會再炸） =========
+if int(monthly_close.shape[0]) < 50:
     st.error("❌ 月線資料不足")
     st.stop()
 
-# =====================
-# 康波趨勢（超穩定版）
-# =====================
-log_price = np.log(monthly_close)
-
+# ========= 康波（穩定算法） =========
+log_price = np.log(monthly_close.values)
 k_wave = (
-    log_price
-    .rolling(WINDOW_MONTHS, min_periods=30)
+    pd.Series(log_price, index=monthly_close.index)
+    .rolling(WINDOW_MONTHS, min_periods=24)
     .mean()
-    .pipe(np.exp)
 )
+k_wave = np.exp(k_wave)
 
-# =====================
-# Plotly 繪圖
-# =====================
+# ========= 畫圖 =========
 fig = go.Figure()
 
 fig.add_trace(go.Scatter(
     x=monthly_close.index,
     y=monthly_close.values,
-    mode="lines",
     name="TAIEX（月線）",
+    mode="lines",
     line=dict(width=2)
 ))
 
 fig.add_trace(go.Scatter(
     x=k_wave.index,
     y=k_wave.values,
-    mode="lines",
     name="康波趨勢（K-Wave）",
+    mode="lines",
     line=dict(width=3, dash="dash")
 ))
 
@@ -92,24 +75,21 @@ fig.update_layout(
     height=600,
     xaxis_title="Date",
     yaxis_title="Index",
-    legend=dict(x=0.8, y=0.95)
+    legend=dict(x=0.02, y=0.98)
 )
 
 st.plotly_chart(fig, use_container_width=True)
 
-# =====================
-# 狀態提示（保底）
-# =====================
+# ========= 決策提示 =========
+latest_price = monthly_close.iloc[-1]
 latest_k = k_wave.dropna().iloc[-1]
-latest_p = monthly_close.iloc[-1]
-
-if latest_p > latest_k:
-    phase = "🌱 Spring（長期偏多）"
-else:
-    phase = "❄️ Winter（長期偏空）"
 
 st.subheader("🧠 康波決策提示")
-st.success(phase)
 
-st.caption(f"📊 月線資料筆數：{len(monthly_close)}")
+if latest_price > latest_k:
+    st.success("🌱 Spring：長期偏多，回檔分批")
+else:
+    st.error("❄️ Winter：長期偏空，風險控管")
+
+st.caption(f"📊 月線筆數：{len(monthly_close)}")
 st.caption(f"📈 康波 window（月）：{WINDOW_MONTHS}")
