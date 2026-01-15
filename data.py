@@ -1,8 +1,10 @@
 import yfinance as yf
-import pandas as pd
 
-def load_twii():
+def load_twii_monthly():
     df = yf.download("^TWII", start="1965-01-01", progress=False)
     df = df[['Close']].dropna()
-    df.index = pd.to_datetime(df.index)
+
+    # 🔑 轉成月資料
+    df = df.resample("M").last()
+
     return df
