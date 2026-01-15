@@ -5,7 +5,7 @@ import numpy as np
 import plotly.graph_objects as go
 
 # =============================
-# Streamlit 基本設定
+# Streamlit 設定
 # =============================
 st.set_page_config(
     page_title="台股康波 × 共振模型（Kondratieff Wave）",
@@ -15,17 +15,15 @@ st.set_page_config(
 st.title("📈 台股康波 × 共振模型（Kondratieff Wave）")
 
 # =============================
-# 參數設定
+# 參數
 # =============================
 START_DATE = "1985-01-01"
 TICKER = "^TWII"
-
-# 康波參數（年）
 K_WAVE_YEARS = 50
 MONTHS = K_WAVE_YEARS * 12
 
 # =============================
-# 下載台股資料（非常關鍵）
+# 載入資料
 # =============================
 @st.cache_data
 def load_data():
@@ -46,7 +44,7 @@ if df.empty:
     st.stop()
 
 # =============================
-# 轉為月線（關鍵步驟）
+# 月線
 # =============================
 monthly_close = (
     df["Close"]
@@ -58,34 +56,33 @@ monthly_close = (
 st.caption(f"📊 月線資料筆數：{len(monthly_close)}")
 
 # =============================
-# 康波計算（穩定版，不用 scipy）
+# 康波計算（穩定版）
 # =============================
-def calc_kondratieff(series: pd.Series, window: int):
-    """
-    使用 long-term moving average + 曲率判斷
-    """
+def calc_k_wave(series: pd.Series, window: int):
     log_price = np.log(series)
 
-    # 長期趨勢（康波）
-    long_trend = log_price.rolling(
+    trend = log_price.rolling(
         window=window,
         min_periods=window // 2
     ).mean()
 
-    # 一階導數（趨勢方向）
-    slope = long_trend.diff()
+    slope = trend.diff()
+    curve = slope.diff()
 
-    # 二階導數（加速度 / 曲率）
-    curvature = slope.diff()
+    return trend, slope, curve
 
-    return long_trend, slope, curvature
-
-k_trend, k_slope, k_curve = calc_kondratieff(monthly_close, MONTHS)
+k_trend, k_slope, k_curve = calc_k_wave(monthly_close, MONTHS)
 
 # =============================
-# 康波相位判定
+# 取「單一數值」（⚠️ 關鍵修正）
 # =============================
-def detect_phase(slope, curve):
+latest_slope = float(k_slope.dropna().iloc[-1])
+latest_curve = float(k_curve.dropna().iloc[-1])
+
+# =============================
+# 康波階段判定（現在一定不會炸）
+# =============================
+def detect_phase(slope: float, curve: float) -> str:
     if slope > 0 and curve > 0:
         return "Spring 🌱"
     elif slope > 0 and curve < 0:
@@ -95,16 +92,13 @@ def detect_phase(slope, curve):
     else:
         return "Winter ❄️"
 
-latest_slope = k_slope.dropna().iloc[-1]
-latest_curve = k_curve.dropna().iloc[-1]
 k_phase = detect_phase(latest_slope, latest_curve)
 
 # =============================
-# Plotly 繪圖
+# 繪圖
 # =============================
 fig = go.Figure()
 
-# 台股月線
 fig.add_trace(
     go.Scatter(
         x=monthly_close.index,
@@ -115,7 +109,6 @@ fig.add_trace(
     )
 )
 
-# 康波趨勢（指數化還原）
 fig.add_trace(
     go.Scatter(
         x=k_trend.index,
@@ -129,9 +122,9 @@ fig.add_trace(
 fig.update_layout(
     height=550,
     template="plotly_dark",
-    legend=dict(x=0.01, y=0.99),
     xaxis_title="Date",
-    yaxis_title="Index"
+    yaxis_title="Index",
+    legend=dict(x=0.01, y=0.99)
 )
 
 st.plotly_chart(fig, use_container_width=True)
@@ -142,20 +135,20 @@ st.plotly_chart(fig, use_container_width=True)
 st.subheader("🧠 康波決策提示")
 
 if "Spring" in k_phase:
-    st.success("🌱 康波 Spring：長期佈局期，逢回可分批布局")
+    st.success("🌱 康波 Spring：長期佈局期，回檔分批")
 elif "Summer" in k_phase:
-    st.warning("🔥 康波 Summer：趨勢仍在，但留意過熱與風控")
+    st.warning("🔥 康波 Summer：趨勢仍在，但需控風險")
 elif "Autumn" in k_phase:
-    st.info("🍂 康波 Autumn：高檔震盪，適合逐步降低曝險")
+    st.info("🍂 康波 Autumn：高檔震盪，降低曝險")
 else:
-    st.error("❄️ 康波 Winter：系統性風險期，現金與防禦優先")
+    st.error("❄️ 康波 Winter：防禦為主，現金重要")
 
 st.markdown(f"""
 **目前康波狀態： `{k_phase}`**
 
-- 康波年期： `{K_WAVE_YEARS} 年`
-- 最新趨勢斜率： `{latest_slope:.5f}`
-- 最新曲率： `{latest_curve:.5f}`
+- 康波週期： `{K_WAVE_YEARS} 年`
+- 最新趨勢斜率： `{latest_slope:.6f}`
+- 最新曲率： `{latest_curve:.6f}`
 """)
 
-st.caption("⚠️ 本模型為長週期趨勢分析，非短線買賣建議")
+st.caption("⚠️ 本工具為長週期趨勢分析，非投資建議")
